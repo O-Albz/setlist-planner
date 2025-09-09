@@ -1,0 +1,47 @@
+# Bytecode / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.cache/
+
+# Virtual envs
+.venv/
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Data & artifacts
+data/
+*.sqlite
+*.db
+*.log
+logs/
+reports/
+*.pdf
+
+# Notebooks junk
+.ipynb_checkpoints/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Vector stores
+.chroma/
+.faiss/
+
+# Build / dist
+build/
+dist/
+site/
+
+# Keep example/sample data tracked
+!src/setlistgraph/data/song_catalog.sample.csv
