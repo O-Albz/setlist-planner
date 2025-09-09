@@ -1,0 +1,52 @@
+
+---
+
+## `pyproject.toml`
+```toml
+[project]
+name = "setlistgraph"
+version = "0.1.0"
+description = "Scripture-grounded worship set planner (LangGraph + Streamlit)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "langchain>=0.3",
+  "langgraph>=0.2",
+  "openai>=1.40",
+  "tiktoken",
+  "pydantic>=2",
+  "numpy",
+  "pandas",
+  "scikit-learn",
+  "chromadb>=0.5",
+  "python-dotenv",
+  "streamlit>=1.37",
+  "reportlab",
+  "spotipy",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+  "black",
+  "mypy",
+  "pre-commit",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+select = ["E","F","I","UP","B"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
