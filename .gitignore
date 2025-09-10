@@ -49,3 +49,5 @@ site/
 # copyrighted lyrics
 lyrics_private/
 .rag_cache/
+.chroma/
+.faiss/
