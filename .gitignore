@@ -45,3 +45,6 @@ site/
 
 # Keep example/sample data tracked
 !src/setlistgraph/data/song_catalog.sample.csv
+
+# copyrighted lyrics
+lyrics_private/
