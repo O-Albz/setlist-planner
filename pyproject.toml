@@ -1,28 +1,32 @@
 
----
-
-## `pyproject.toml`
-```toml
 [project]
 name = "setlistgraph"
 version = "0.1.0"
 description = "Scripture-grounded worship set planner (LangGraph + Streamlit)"
 readme = "README.md"
 requires-python = ">=3.10"
+# Broader deps (LangGraph & friends). If anything fails to build on your machine,
+# fall back to the minimal version.
 dependencies = [
-  "langchain>=0.3",
-  "langgraph>=0.2",
+  "pandas",
+  "scikit-learn",
+  "python-dotenv",
+  "streamlit>=1.37",
   "openai>=1.40",
+  # LangChain split: use core + community to avoid huge extra deps
+  "langchain-core>=0.3",
+  "langchain-community>=0.3",
+  "langgraph>=0.2",
+  # Optional vector store; can be heavy on some systems. Comment out if it fails.
+  # "chromadb>=0.5",
+  # PDF export (optional; comment out if wheels aren't available on your OS)
+  # "reportlab",
+  # Spotify API
+  "spotipy",
+  # Tokenizer (optional)
   "tiktoken",
   "pydantic>=2",
   "numpy",
-  "pandas",
-  "scikit-learn",
-  "chromadb>=0.5",
-  "python-dotenv",
-  "streamlit>=1.37",
-  "reportlab",
-  "spotipy",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +42,12 @@ dev = [
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.black]
 line-length = 100
