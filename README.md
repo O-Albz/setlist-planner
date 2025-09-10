@@ -26,12 +26,6 @@ tests/                   # unit tests
 notebooks/               # optional ETL/experiments
 ```
 
-## Week 1 goals (Data + indices)
-- [ ] Catalog schema + 10–50 seed songs
-- [ ] Loader & schema validation
-- [ ] Simple TF-IDF retriever (themes/scripture)
-- [ ] Streamlit prototype showing candidates
-
 ## Env vars (see .env.example)
 - `OPENAI_API_KEY`
 - `SPOTIFY_CLIENT_ID`
@@ -47,4 +41,4 @@ make run       # streamlit UI
 ```
 
 ## License
-MIT (or your choice)
+MIT
