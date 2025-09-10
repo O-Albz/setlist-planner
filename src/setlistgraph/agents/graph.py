@@ -62,6 +62,7 @@ class S(TypedDict, total=False):
     notes: str
 
 
+
 # ---------------------------
 # Helpers
 # ---------------------------
@@ -328,12 +329,15 @@ def assemble(state: S) -> S:
 # ---------------------------
 # Build graph
 # ---------------------------
+
 def build_app():
     g = StateGraph(S)
     g.add_node("intake", intake)
     g.add_node("retrieve_candidates", retrieve_candidates)
     g.add_node("flow_plan", flow_plan)
+
     g.add_node("judge_transitions", judge_transitions)  # ← new audit node
+
     g.add_node("assemble", assemble)
 
     g.set_entry_point("intake")
@@ -382,3 +386,4 @@ def plan_setlist(
 
 
 __all__ = ["build_app", "plan_setlist"]
+
