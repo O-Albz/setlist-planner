@@ -7,6 +7,7 @@ from setlistgraph.io.loaders import load_catalog, validate_catalog
 from setlistgraph.retrievers.songs import SimpleSongRetriever, filter_by_gathering
 from setlistgraph.ui.onsong_batch_snippet import *
 from setlistgraph.ui.onsong_import_snippet import *
+from setlistgraph.ui.agent_console import *
 
 st.set_page_config(page_title="SetlistGraph", page_icon="🎶", layout="wide")
 st.title("SetlistGraph — Scripture-Grounded Set Planner")
