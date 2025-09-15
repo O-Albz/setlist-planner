@@ -1,20 +1,17 @@
-.PHONY: setup lint format test run precommit
+PY=python3
+VENV=.venv
 
 setup:
-	pip install -e ".[dev]"
-	pre-commit install
+\tbash scripts/setup_macos.sh
 
-lint:
-	ruff check .
+activate:
+\t@echo "Run: source $(VENV)/bin/activate"
 
-format:
-	black .
+seed-chroma:
+\t$(PY) scripts/build_chroma_from_csv.py src/setlistgraph/data/song_catalog.sample.csv .chroma
 
 test:
-	pytest
+\t$(PY) -m pytest -q
 
-run:
-	streamlit run src/setlistgraph/ui/app.py
-
-precommit:
-	pre-commit run --all-files
+agent:
+\tstreamlit run src/setlistgraph/ui/app.py

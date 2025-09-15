@@ -1,11 +1,4 @@
-song_id,title,artist,themes,scripture_refs,lyrics_blurb,default_key,vocal_range,energy,bpm,meter,segments,youth_score,spotify_uri,keys_available
-1,"10,000 Reasons",Matt Redman,gratitude;blessing,Psalm 103,"Bless the Lord, O my soul",G,low-mid,2,73,4/4,Verse/Chorus/Bridge,2,spotify:track:10kReasons,C;D;E;F;G
-2,Living Hope,Phil Wickham,hope;resurrection,1 Peter 1:3,How great the chasm,D,mid,3,75,4/4,Verse/Chorus/Bridge,3,spotify:track:LivingHope,C;D;E
-3,Oceans (Where Feet May Fail),Hillsong UNITED,faith;trust,Matthew 14:29,Spirit lead me where my trust is without borders,D,mid-high,2,65,6/8,Verse/Chorus/Bridge,4,spotify:track:Oceans,C;D;E;F
-4,How Great Is Our God,Chris Tomlin,worship;greatness,Psalm 145,"How great is our God, sing with me",C,low-mid,3,72,4/4,Verse/Chorus/Bridge,2,spotify:track:HowGreatIsOurGod,C;D;E;F
-5,Reckless Love,Cory Asbury,love;grace,Luke 15,"Oh the overwhelming, never-ending reckless love of God",G,mid,3,83,4/4,Verse/Chorus/Bridge,4,spotify:track:RecklessLove,F;G;A
-6,Cornerstone,Hillsong Worship,hope;foundation,Ephesians 2:20,"Christ alone, cornerstone",C,low-mid,3,72,4/4,Verse/Chorus/Bridge,3,spotify:track:Cornerstone,C;D;E;F
-7,Build My Life,Housefires,worship;holiness,Psalm 18:2,Worthy of every song we could ever sing,G,mid,2,70,4/4,Verse/Chorus/Bridge,2,spotify:track:BuildMyLife,F;G;A
-8,Goodness of God,Bethel Music,faithfulness;goodness,Psalm 23,All my life You have been faithful,A,mid-high,3,63,4/4,Verse/Chorus/Bridge,3,spotify:track:GoodnessOfGod,G;A;B
-9,Great Are You Lord,All Sons & Daughters,praise;life,Psalm 150,It's Your breath in our lungs,D,low-mid,3,72,4/4,Verse/Chorus/Bridge,3,spotify:track:GreatAreYouLord,C;D;E
-10,Way Maker,Sinach,miracles;faith,Exodus 14,"Way maker, miracle worker, promise keeper",E,mid,4,70,4/4,Verse/Chorus/Bridge,5,spotify:track:WayMaker,D;E;F#
+song_id,title,artist,bpm,key,mode,energy,scripture_refs,spotify_uri,copyright_status,lyrics_path,theme_summary,themes,lyrics_blurb,default_key,vocal_range,meter,segments,youth_score,keys_available
+a1b2c3d4,Hope In You,O Albz,100,D,major,4,1 Peter 1:3,,unknown,,A hopeful modern worship song about new birth and living hope in Christ.,hope;new life;resurrection,"Upbeat opener about living hope and new birth.",D,A3–E5,4/4,"V1|C|V2|C|B|C",0.7,C;D;E
+e5f6a7b8,Grace Unending,O Albz,74,A,major,2,Ephesians 2:8-9,,unknown,,Reflective lyrics about grace upon grace carrying us through every season.,grace;mercy;dependence,"Reflective ballad focusing on grace upon grace.",A,G3–D5,4/4,"V1|C|V2|C|B|C",0.5,G;A;Bb
+c9d0e1f2,Lift My Voice,O Albz,92,G,major,3,Psalm 13:6,,unknown,,Upbeat chorus declaring trust and praise even in the night.,praise;faithfulness;trust,"Mid-tempo praise with a strong singable chorus.",G,A3–E5,4/4,"V1|C|V2|C|B|C",0.6,F;G;A

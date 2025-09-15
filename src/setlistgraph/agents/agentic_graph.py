@@ -6,19 +6,35 @@ from typing import Any, Dict, List, Optional, Tuple, Callable
 
 # ---- Local LLM via Ollama (agentic supervisor + tools that need generation) ----
 try:
-    from langchain_ollama import ChatOllama
+    from langchain_ollama import ChatOllama as _ChatOllamaImpl
+    ChatOllama = _ChatOllamaImpl   # exported symbol so tests can monkeypatch
     _HAS_LLM = True
 except Exception:
     _HAS_LLM = False
+    class ChatOllama:  # placeholder so monkeypatch works even without langchain-ollama installed
+        def __init__(self, *a, **kw):
+            raise RuntimeError("langchain-ollama not installed")
+        def invoke(self, *a, **kw):
+            raise RuntimeError("langchain-ollama not installed")
 
-# ---- Retrieval & catalog plumbing (your existing modules) ----
-from setlistgraph.pipelines.embed_catalog import load_index
-from setlistgraph.retrievers.semantic import SemanticSongRetriever
-from setlistgraph.io.onsong_loader import import_onsong_to_catalog
+# ---- Prefer Chroma (vector DB); fall back to file-based cache lazily ----
+try:
+    from setlistgraph.retrievers.vdb import ChromaSongRetriever, migrate_rag_cache_to_chroma  # noqa: F401
+    _HAS_CHROMA = True
+except Exception:
+    _HAS_CHROMA = False
 
 # ---- Optional hard metrics (for reporting only; NOT enforced) ----
-from setlistgraph.scoring.compatibility import is_transition_ok
-
+try:
+    from setlistgraph.scoring.compatibility import is_transition_ok as _compat_check
+except Exception:
+    def _compat_check(k1, b1, k2, b2, semitone_limit=2, drift=0.15):
+        class _Dummy:
+            semitones = None
+            bpm_delta = 0.0
+            keys_ok = True
+            tempo_ok = True
+        return _Dummy()
 
 # =========================
 # Utilities
@@ -33,14 +49,6 @@ def _to_float(x: Any, default: float = 0.0) -> float:
     try: return float(x)
     except Exception: return default
 
-def _energy(x: Any, default: int = 3) -> int:
-    try:
-        v = int(x)
-        return v if 1 <= v <= 5 else default
-    except Exception:
-        return default
-
-
 # =========================
 # Agent State
 # =========================
@@ -50,8 +58,8 @@ class AgentState:
     theme: str = ""
     scripture: str = ""
     n_songs: int = 4
-    index_dir: str = ".rag_cache"
-    catalog_path: str = "src/setlistgraph/data/catalog.csv"
+    index_dir: str = ".chroma"  # default to Chroma
+    catalog_path: str = "src/setlistgraph/data/song_catalog.sample.csv"
     llm_model: str = "llama3.2"
     temperature: float = 0.4
     top_k: int = 50
@@ -64,27 +72,48 @@ class AgentState:
     notes: str = ""
     history: List[Dict[str, str]] = field(default_factory=list)             # tool call log
 
-
 # =========================
 # Tools (side effects + state updates)
 # =========================
 ToolFn = Callable[[AgentState, Dict[str, Any]], str]
 
 def tool_retrieve_semantic(state: AgentState, args: Dict[str, Any]) -> str:
-    """args: {"query": str, "top_k": int}  — pure text similarity; BPM/Key not filtered here."""
+    """
+    args: {"query": str, "top_k": int, "use_vdb": bool=True}
+    Pure text similarity; BPM/Key not filtered here.
+    """
     query = (args.get("query") or f"{state.theme} {state.scripture}").strip()
     top_k = int(args.get("top_k", state.top_k))
-    meta, emb, _ = load_index(state.index_dir)
+    use_vdb = bool(args.get("use_vdb", True))
+
+    # 1) Chroma (preferred)
+    if _HAS_CHROMA and use_vdb:
+        retr = ChromaSongRetriever(chroma_dir=state.index_dir)
+        hits = retr.search(query or "*", top_k=top_k)
+        keep = ["song_id","title","artist","bpm","key","scripture_refs","spotify_uri","score","theme_summary"]
+        for k in keep:
+            if k not in hits.columns:
+                hits[k] = None
+        state.candidates = hits[keep].to_dict(orient="records")
+        return f"[Chroma] Retrieved {len(state.candidates)} candidates."
+
+    # 2) File-based cache (lazy import)
+    from setlistgraph.pipelines.embed_catalog import load_index
+    from setlistgraph.retrievers.semantic import SemanticSongRetriever
+    meta, emb, _ = load_index(state.index_dir)  # here index_dir = ".rag_cache"
     ret = SemanticSongRetriever(meta, emb)
     hits = ret.search(query or "*", top_k=top_k)
-    keep = ["song_id","title","artist","bpm","key","energy","scripture_refs","spotify_uri","score"]
+    keep = ["song_id","title","artist","bpm","key","scripture_refs","spotify_uri","score","theme_summary"]
+    for k in keep:
+        if k not in hits.columns:
+            hits[k] = None
     state.candidates = hits[keep].to_dict(orient="records")
-    return f"Retrieved {len(state.candidates)} candidates."
+    return f"[RAG cache] Retrieved {len(state.candidates)} candidates."
 
 def tool_plan_llm(state: AgentState, args: Dict[str, Any]) -> str:
     """
     args: {"n_songs": int}
-    LLM proposes an order from top candidates (metadata only; no lyrics).
+    LLM proposes an order from top candidates (no catalog 'energy'; it infers perceived_energy).
     """
     if not _HAS_LLM:
         raise RuntimeError("langchain-ollama not installed.")
@@ -94,7 +123,7 @@ def tool_plan_llm(state: AgentState, args: Dict[str, Any]) -> str:
     if not slate:
         return "No candidates to plan."
 
-    # Only metadata to the LLM (privacy)
+    # Metadata to the LLM (no lyrics content is sent; theme_summary is a compact hint)
     mini = [
         {
             "song_id": c.get("song_id"),
@@ -102,8 +131,7 @@ def tool_plan_llm(state: AgentState, args: Dict[str, Any]) -> str:
             "artist": c.get("artist"),
             "bpm": _to_float(c.get("bpm")),
             "key": (c.get("key") or c.get("default_key") or ""),
-            "energy": _energy(c.get("energy", 3)),
-            "scripture_refs": c.get("scripture_refs"),
+            "theme_summary": c.get("theme_summary") or "",
             "score": float(c.get("score") or 0.0),
         } for c in slate if c.get("song_id")
     ]
@@ -112,15 +140,18 @@ def tool_plan_llm(state: AgentState, args: Dict[str, Any]) -> str:
     llm = ChatOllama(model=state.llm_model, temperature=state.temperature)
     prompt = f"""
 You are a worship set planner. Choose an order of exactly {n} songs (IDs) from CANDIDATES.
-Targets:
-- Musical arc: opener (higher energy/tempo), reflective middle (lower), build, sending (higher)
-- Prefer smoother transitions (small key/tempo jumps), but you MAY break this with a reason
-- Keep semantic score high
+
+Guidelines:
+- Build a musical & emotional arc (gather → reflect → build → send).
+- Do NOT assume faster BPM = more energetic. Infer perceived energy from lyrics/summary, singability, and arrangement norms. BPM is only one signal among many.
+- Prefer smoother transitions (small key/tempo jumps), but you MAY break this with a reason.
+- Keep semantic relevance high for the theme/scripture.
 
 Return ONLY JSON:
 {{
   "order": ["<song_id>", ... exactly {n} ids ...],
-  "reasoning": "short notes about the flow and any tradeoffs"
+  "perceived_energy": {{"<song_id>": 1-5, ...}},
+  "reasoning": "short notes about the arc and any tradeoffs"
 }}
 
 CANDIDATES:
@@ -130,14 +161,21 @@ CANDIDATES:
     resp = llm.invoke(prompt)
     data = _extract_json(resp.content)
     order_ids = [i for i in data.get("order", []) if i in id_to_row][:n]
-    state.plan = [id_to_row[i] for i in order_ids]
+    energies = data.get("perceived_energy", {}) or {}
+    plan = []
+    for sid in order_ids:
+        row = dict(id_to_row[sid])  # copy
+        pe = energies.get(sid)
+        if isinstance(pe, (int, float)):
+            row["perceived_energy"] = int(pe)
+        plan.append(row)
+    state.plan = plan
     state.critique = data.get("reasoning", "")
     return f"LLM planned {len(state.plan)} songs."
 
 def tool_reflect_and_repair(state: AgentState, args: Dict[str, Any]) -> str:
     """
     LLM critiques the current plan (e.g., rough transitions, arc issues) and returns a revised order.
-    This gives you a fully agentic, non-deterministic planner.
     """
     if not _HAS_LLM:
         raise RuntimeError("langchain-ollama not installed.")
@@ -146,14 +184,21 @@ def tool_reflect_and_repair(state: AgentState, args: Dict[str, Any]) -> str:
 
     # Compact view for the model
     plan_view = [
-        {"song_id": s.get("song_id"), "title": s.get("title"), "bpm": _to_float(s.get("bpm")),
-         "key": (s.get("key") or s.get("default_key") or ""), "energy": _energy(s.get("energy", 3))}
+        {
+            "song_id": s.get("song_id"),
+            "title": s.get("title"),
+            "bpm": _to_float(s.get("bpm")),
+            "key": (s.get("key") or s.get("default_key") or ""),
+            "perceived_energy": s.get("perceived_energy", None),
+        }
         for s in state.plan
     ]
     llm = ChatOllama(model=state.llm_model, temperature=state.temperature)
     prompt = f"""
 You are a strict but creative music director.
-Given PLAN, identify transition risks (key jumps, tempo clashes, energy whiplash).
+Given PLAN, identify transition risks (key jumps, tempo clashes) and emotional arc issues.
+Remember: do NOT equate BPM with energy; use lyrics/summary and singability to judge perceived energy.
+
 Then produce a better order using ONLY the same song IDs (no new songs, no removals), or say it's already optimal.
 
 Return ONLY JSON:
@@ -179,7 +224,6 @@ PLAN:
 def tool_audit_metrics(state: AgentState, args: Dict[str, Any]) -> str:
     """
     Compute *metrics only* (NOT enforcing): semitone distance and tempo deltas between adjacent songs.
-    This keeps the system agentic: the LLM may break rules with justification; you still get visibility.
     """
     trs: List[Dict[str, Any]] = []
     p = state.plan
@@ -188,7 +232,7 @@ def tool_audit_metrics(state: AgentState, args: Dict[str, Any]) -> str:
         k1 = (a.get("key") or a.get("default_key") or "").strip()
         k2 = (b.get("key") or b.get("default_key") or "").strip()
         b1 = _to_float(a.get("bpm")); b2 = _to_float(b.get("bpm"))
-        chk = is_transition_ok(k1, b1, k2, b2, semitone_limit=2, drift=0.15)
+        chk = _compat_check(k1, b1, k2, b2, semitone_limit=2, drift=0.15)
         trs.append({
             "i": i,
             "from": a.get("title"), "to": b.get("title"),
@@ -207,23 +251,29 @@ def tool_export_csv(state: AgentState, args: Dict[str, Any]) -> str:
     return f"Exported to {path}."
 
 def tool_import_onsong(state: AgentState, args: Dict[str, Any]) -> str:
+    # Lazy import to keep module import-safe
+    from setlistgraph.io.onsong_loader import import_onsong_to_catalog
     txt = args.get("onsong_text", "")
     default_bpm = float(args.get("default_bpm", 120.0))
     row = import_onsong_to_catalog(
         onsong_text=txt, catalog_path=state.catalog_path, lyrics_dir="lyrics_private", default_bpm=default_bpm
     )
+    # Optional Chroma upsert so it's searchable immediately
+    if _HAS_CHROMA and args.get("upsert", True):
+        retr = ChromaSongRetriever(chroma_dir=state.index_dir)
+        retr.upsert_rows([row])
+        return f"Imported and upserted '{row.get('title')}' ({row.get('bpm')} BPM)."
     return f"Imported '{row.get('title')}' ({row.get('bpm')} BPM)."
-
 
 TOOLS: Dict[str, Tuple[ToolFn, str, Dict[str, Any]]] = {
     "retrieve_semantic": (
         tool_retrieve_semantic,
-        "Retrieve top candidate songs semantically (metadata only, no lyrics).",
-        {"query": "str (free text)", "top_k": "int (default 50)"},
+        "Retrieve top candidate songs semantically (metadata only; no lyrics).",
+        {"query": "str (free text)", "top_k": "int (default 50)", "use_vdb": "bool (default True)"},
     ),
     "plan_llm": (
         tool_plan_llm,
-        "Use an LLM to propose an ordered setlist from candidates (agentic, not deterministic).",
+        "Use an LLM to propose an ordered setlist from candidates (infers perceived energy).",
         {"n_songs": "int (default from state)"},
     ),
     "reflect_and_repair": (
@@ -243,14 +293,13 @@ TOOLS: Dict[str, Tuple[ToolFn, str, Dict[str, Any]]] = {
     ),
     "import_onsong": (
         tool_import_onsong,
-        "Import an OnSong text into the catalog (stores plain lyrics locally).",
-        {"onsong_text": "str", "default_bpm": "float"},
+        "Import an OnSong text into the catalog (stores plain lyrics locally; optional Chroma upsert).",
+        {"onsong_text": "str", "default_bpm": "float", "upsert": "bool (default True)"},
     ),
 }
 
 def tool_manifest() -> List[Dict[str, Any]]:
     return [{"name": k, "description": v[1], "args_schema": v[2]} for k, v in TOOLS.items()]
-
 
 # =========================
 # Supervisor (Agentic loop)
@@ -277,8 +326,8 @@ def run_agentic_graph(
     theme: str = "",
     scripture: str = "",
     n_songs: int = 4,
-    index_dir: str = ".rag_cache",
-    catalog_path: str = "src/setlistgraph/data/catalog.csv",
+    index_dir: str = ".chroma",
+    catalog_path: str = "src/setlistgraph/data/song_catalog.sample.csv",
     llm_model: str = "llama3.2",
     temperature: float = 0.4,
     max_steps: int = 8,
@@ -314,7 +363,7 @@ def run_agentic_graph(
         except Exception:
             # Fallback heuristic: follow the typical flow
             if not state.candidates:
-                decision = {"action": "retrieve_semantic", "action_input": {"top_k": 50}}
+                decision = {"action": "retrieve_semantic", "action_input": {"top_k": state.top_k}}
             elif not state.plan:
                 decision = {"action": "plan_llm", "action_input": {"n_songs": state.n_songs}}
             elif not state.transitions_report:
@@ -330,9 +379,9 @@ def run_agentic_graph(
         args = decision.get("action_input") or {}
         fn_tuple = TOOLS.get(action)
         if not fn_tuple:
-            # If the model requests an unknown tool, try the next sensible step
+            # Unknown tool: try next sensible step
             if not state.candidates:
-                action, args = "retrieve_semantic", {"top_k": 50}
+                action, args = "retrieve_semantic", {"top_k": state.top_k}
             elif not state.plan:
                 action, args = "plan_llm", {"n_songs": state.n_songs}
             else:
