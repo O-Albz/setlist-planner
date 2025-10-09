@@ -3,6 +3,7 @@ from __future__ import annotations
 import json, re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Callable
+import os
 
 # ---- Local LLM via Ollama (agentic supervisor + tools that need generation) ----
 try:
@@ -317,6 +318,12 @@ IMPORTANT:
 """
 
 def get_llm(model: str, temperature: float):
+    if os.getenv("USE_STUB_LLM") == "1":
+        class _Stub: 
+            def __init__(self, *a, **k): pass
+            def invoke(self, m): return type("R",(),{"content":'{"action":"final","action_input":{"summary":"stub"}}'})
+        return _Stub()
+
     if not _HAS_LLM:
         raise RuntimeError("langchain-ollama not installed. `pip install langchain-ollama` and run `ollama serve`.")
     return ChatOllama(model=model, temperature=temperature)
@@ -327,10 +334,11 @@ def run_agentic_graph(
     scripture: str = "",
     n_songs: int = 4,
     index_dir: str = ".chroma",
-    catalog_path: str = "src/setlistgraph/data/song_catalog.sample.csv",
-    llm_model: str = "llama3.2",
+    catalog_path: str = "",
+    llm_model: str = "llama3.2:3b",
     temperature: float = 0.4,
-    max_steps: int = 8,
+    max_steps: int = 10,
+    tool_callback=None,  # Add this parameter
 ) -> AgentState:
     state = AgentState(
         goal=goal, theme=theme, scripture=scripture, n_songs=n_songs,
@@ -339,6 +347,27 @@ def run_agentic_graph(
     )
     llm = get_llm(model=llm_model, temperature=temperature)
 
+    # Modify your execute_action function to use the callback
+    def execute_action(action: str, args: Dict[str, Any]) -> Any:
+        if tool_callback:
+            tool_callback(action, args=args, status="start")
+            
+        try:
+            # Execute the action as before
+            result = tools[action](**args)
+            
+            if tool_callback:
+                tool_callback(action, args=args, result=result, status="complete")
+                
+            return result
+        except Exception as e:
+            error_msg = f"ERROR: {str(e)}"
+            
+            if tool_callback:
+                tool_callback(action, args=args, result=error_msg, status="error")
+                
+            return error_msg
+    
     for _ in range(max_steps):
         ctx = {
             "goal": state.goal,

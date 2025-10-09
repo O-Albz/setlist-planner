@@ -6,6 +6,7 @@ from typing import Iterable, List, Tuple, Dict, Any, Optional
 import pandas as pd
 
 from .onsong_loader import import_onsong_to_catalog
+from .onsong_pdf_loader import load_pdf
 
 # Optional: PDF support (text/ocr -> OnSong -> import)
 try:
