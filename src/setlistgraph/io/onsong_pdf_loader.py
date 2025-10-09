@@ -1,116 +1,147 @@
+"""
+Loader for OnSong PDF files.
+Extracts song information including title, artist, key, BPM, and lyrics from PDF files.
+"""
+
 from __future__ import annotations
-from pathlib import Path
-from typing import Optional, Dict, Any, List
 import re
+import logging
+from pathlib import Path
+from typing import Dict, Any, Optional
 
-# soft deps; keep imports inside functions to avoid hard runtime reqs
-from setlistgraph.io.onsong_loader import import_onsong_to_catalog  # reuse existing pipeline
-
-HEADER_KV = re.compile(r"^\s*([A-Za-zÄÖÅäöå]+)\s*:\s*(.+)$")
-
-def _normalize_text(s: str) -> str:
-    # de-hyphenate common line wraps: "ord-\net" -> "ordet"
-    s = re.sub(r"-\s*\n", "", s)
-    # collapse over-wrapped lines
-    s = re.sub(r"[ \t]+\n", "\n", s)
-    # collapse 3+ blank lines
-    s = re.sub(r"\n{3,}", "\n\n", s)
-    return s.strip()
-
-def _pdf_text(pdf_path: str, ocr_fallback: bool = True, dpi: int = 300, max_pages: Optional[int] = None) -> str:
-    """
-    Try embedded text first (pdfplumber). If too little text, fallback to OCR (pytesseract + pdf2image).
-    """
-    text = ""
+# Try different PDF libraries in order of preference
+try:
+    import pypdf
+    PDF_LIBRARY = "pypdf"
+except ImportError:
     try:
-        import pdfplumber
-        with pdfplumber.open(pdf_path) as pdf:
-            pages = pdf.pages[:max_pages] if max_pages else pdf.pages
-            parts = []
-            for p in pages:
-                parts.append(p.extract_text() or "")
-            text = "\n".join(parts)
-    except Exception:
-        text = ""
+        from pdfminer.high_level import extract_text
+        PDF_LIBRARY = "pdfminer"
+    except ImportError:
+        PDF_LIBRARY = None
 
-    if (not text or len(text.strip()) < 80) and ocr_fallback:
+logger = logging.getLogger(__name__)
+
+class OnSongPDFLoader:
+    """Loads and parses OnSong PDF files."""
+    
+    def __init__(self, file_path: str):
+        """Initialize with path to PDF file."""
+        self.file_path = file_path
+        if not PDF_LIBRARY:
+            raise ImportError("No PDF library available. Install pypdf or pdfminer.six")
+    
+    def load(self) -> Dict[str, Any]:
+        """Load and parse the PDF file."""
+        text = self._extract_text()
+        return self._parse_onsong_text(text)
+    
+    def _extract_text(self) -> str:
+        """Extract text from the PDF file using available library."""
         try:
-            from pdf2image import convert_from_path
-            import pytesseract
-            pages = convert_from_path(pdf_path, dpi=dpi)
-            ocr_parts = []
-            for img in (pages[:max_pages] if max_pages else pages):
-                ocr_parts.append(pytesseract.image_to_string(img))
-            text = "\n".join(ocr_parts)
+            if PDF_LIBRARY == "pypdf":
+                return self._extract_with_pypdf()
+            elif PDF_LIBRARY == "pdfminer":
+                return extract_text(self.file_path)
         except Exception as e:
-            # leave text possibly empty; caller will handle
-            pass
+            logger.error(f"Error extracting text from PDF: {e}")
+            # Fall back to treating it as text file if PDF extraction fails
+            try:
+                with open(self.file_path, "r", encoding="utf-8", errors="replace") as file:
+                    return file.read()
+            except Exception:
+                logger.error(f"Failed to read file as text: {self.file_path}")
+                return ""
+    
+    def _extract_with_pypdf(self) -> str:
+        """Extract text using pypdf library."""
+        with open(self.file_path, "rb") as file:
+            reader = pypdf.PdfReader(file)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            return text
+    
+    def _parse_onsong_text(self, text: str) -> Dict[str, Any]:
+        """Parse OnSong formatted text into structured data."""
+        # Extract title, typically the first line
+        lines = text.split('\n')
+        title = None
+        i = 0
+        
+        # Find the first non-empty line as the title
+        while i < len(lines) and not title:
+            if lines[i].strip():
+                title = lines[i].strip()
+            i += 1
+                
+        # Initialize metadata dictionary
+        metadata = {}
+        
+        # Common OnSong metadata patterns
+        patterns = {
+            'artist': r'(?:Artist|Author):\s*(.+?)(?:\n|$)',
+            'key': r'Key:\s*([A-G][#b]?m?)',
+            'bpm': r'(?:Tempo|BPM):\s*(\d+)',
+            'ccli': r'CCLI:\s*(\d+)',
+            'capo': r'Capo:\s*(\d+)',
+            'time_sig': r'Time(?:\s+Sig)?:\s*(\d+/\d+)',
+        }
+        
+        # Search for metadata in the text
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                metadata[key] = match.group(1).strip()
+        
+        # Convert BPM to float if present
+        if 'bpm' in metadata:
+            try:
+                metadata['bpm'] = float(metadata['bpm'])
+            except ValueError:
+                pass
+        
+        # Extract lyrics (everything after metadata section)
+        lyrics_start = 0
+        in_metadata = True
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
+            
+            # Look for common metadata indicators
+            if any(indicator in line_lower for indicator in ['key:', 'artist:', 'author:', 'bpm:', 'tempo:', 'ccli:', 'capo:', 'time:']):
+                lyrics_start = i + 1
+                continue
+                
+            # If we're past the metadata and find a chord or section marker, this is likely where lyrics start
+            if i > 3 and (('[' in line and ']' in line) or  # Section marker like [Verse]
+                         (line.strip() and any(c.isupper() for c in line) and  # Potential chord line
+                          not line.startswith('CCLI') and 
+                          not line.startswith('Key:'))):
+                lyrics_start = i
+                in_metadata = False
+                break
+        
+        # Extract the lyrics part
+        lyrics = "\n".join(lines[lyrics_start:]).strip()
+        
+        # Assemble the result
+        result = {
+            'title': title or "Unknown Title",
+            'artist': metadata.get('artist', 'Unknown'),
+            'key': metadata.get('key', ''),
+            'bpm': metadata.get('bpm', 0),
+            'ccli': metadata.get('ccli', ''),
+            'capo': metadata.get('capo', ''),
+            'time_sig': metadata.get('time_sig', ''),
+            'lyrics': lyrics,
+            'file_path': self.file_path,
+            'file_name': Path(self.file_path).name
+        }
+        
+        return result
 
-    return _normalize_text(text or "")
 
-def _infer_title_artist(raw_lines: List[str]) -> tuple[Optional[str], Optional[str]]:
-    """
-    Heuristic: if no explicit "Title:" or "Artist:" lines exist,
-    use the first non-empty line as title, second as artist if it smells like a name.
-    """
-    lines = [ln.strip() for ln in raw_lines if ln.strip()]
-    if not lines:
-        return None, None
-    title = lines[0]
-    artist = None
-    if len(lines) > 1 and len(lines[1].split()) <= 5:
-        artist = lines[1]
-    return title, artist
-
-def _as_onsong_text(extracted: str, title: Optional[str], artist: Optional[str], key: Optional[str], tempo: Optional[float]) -> str:
-    """
-    Wrap the PDF text in a light OnSong-like header so the existing importer can parse it.
-    """
-    header = []
-    if title:  header.append(f"Title: {title}")
-    if artist: header.append(f"Artist: {artist}")
-    if key:    header.append(f"Key: {key}")
-    if tempo:  header.append(f"Tempo: {int(tempo)}")
-    hdr = "\n".join(header)
-    body = extracted.strip()
-    return f"{hdr}\n\n{body}" if hdr else body
-
-def import_onsong_pdf_to_catalog(
-    pdf_path: str,
-    catalog_path: str,
-    lyrics_dir: str = "lyrics_private",
-    default_bpm: float = 120.0,
-    key: Optional[str] = None,
-    title: Optional[str] = None,
-    artist: Optional[str] = None,
-    ocr_fallback: bool = True,
-    dpi: int = 300,
-    max_pages: Optional[int] = None,
-    extra_meta: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    Extract text (OCR if needed) from a PDF chord/lyric sheet, convert to OnSong-ish text,
-    and reuse the normal OnSong importer (saves plain lyrics, appends to catalog).
-    """
-    text = _pdf_text(pdf_path, ocr_fallback=ocr_fallback, dpi=dpi, max_pages=max_pages)
-    if not text.strip():
-        raise ValueError(f"Could not extract text from PDF: {pdf_path}")
-
-    # If not explicitly provided, infer title/artist from top lines
-    if not (title and artist):
-        lines = text.splitlines()
-        t_guess, a_guess = _infer_title_artist(lines[:8])
-        title = title or t_guess
-        artist = artist or a_guess
-
-    onsong_text = _as_onsong_text(text, title=title, artist=artist, key=key, tempo=default_bpm)
-    row = import_onsong_to_catalog(
-        onsong_text=onsong_text,
-        catalog_path=catalog_path,
-        lyrics_dir=lyrics_dir,
-        default_bpm=default_bpm,
-        **(extra_meta or {})
-    )
-    # Stash original file path in metadata-like field if you want
-    row["source_pdf"] = str(pdf_path)
-    return row
+def load_pdf(file_path: str) -> Dict[str, Any]:
+    """Convenience function to load an OnSong PDF file."""
+    loader = OnSongPDFLoader(file_path)
+    return loader.load()

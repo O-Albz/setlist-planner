@@ -1,62 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "setlistgraph"
 version = "0.1.0"
-description = "Scripture-grounded worship set planner (LangGraph + Streamlit)"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+description = "A tool for planning worship setlists"
 readme = "README.md"
-requires-python = ">=3.10"
-# Broader deps (LangGraph & friends). If anything fails to build on your machine,
-# fall back to the minimal version.
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 dependencies = [
-  "pandas",
-  "scikit-learn",
-  "python-dotenv",
-  "streamlit>=1.37",
-  "openai>=1.40",
-  # LangChain split: use core + community to avoid huge extra deps
-  "langchain-core>=0.3",
-  "langchain-community>=0.3",
-  "langgraph>=0.2",
-  # Optional vector store; can be heavy on some systems. Comment out if it fails.
-  # "chromadb>=0.5",
-  # PDF export (optional; comment out if wheels aren't available on your OS)
-  # "reportlab",
-  # Spotify API
-  "spotipy",
-  # Tokenizer (optional)
-  "tiktoken",
-  "pydantic>=2",
-  "numpy",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "streamlit>=1.26.0",
+    "chromadb>=0.4.15",
+    "langchain>=0.0.335",
+    "langchain-ollama>=0.0.1",
+    "langchain-community>=0.0.13",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "pypdf>=3.15.0",
+    "pdfminer.six>=20221105",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest",
-  "pytest-cov",
-  "ruff",
-  "black",
-  "mypy",
-  "pre-commit",
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
 ]
-
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.black]
-line-length = 100
-target-version = ["py310"]
-
-[tool.ruff]
-line-length = 100
-select = ["E","F","I","UP","B"]
+packages = ["setlistgraph"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
-pythonpath = ["src"]
+testpaths = ["tests"]
